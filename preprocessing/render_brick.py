@@ -1,17 +1,19 @@
+#!/usr/bin/env python
 import bpy
-from mathutils import Euler
-
 import os
+import numpy as np
+import json
 import random
-from math import pi
 import struct
+import code
+
+from mathutils import Euler
 
 def hex2rgb(hex):
     int_tuple = struct.unpack("BBB", bytes.fromhex(hex))
-    return tuple([val/255 for val in int_tuple]) 
+    return [val/255 for val in int_tuple]
 
-
-def render_brick(brick_file_path: str, n: int, render_folder: str, background_file_path: str, debug):
+def render_brick(brick_file_path: str, n: int, render_folder: str, background_file_path: str):
     """Renders n images of a given .dat file
 
     :param brick_file_path: location of .dat file
@@ -20,54 +22,52 @@ def render_brick(brick_file_path: str, n: int, render_folder: str, background_fi
     :param background_file_path: path to list of background images
     :return: Saves generated images to render_folder
     """
-
-    # load config file for blender settings
-    with open(os.path.join(os.path.dirname(__file__), "config.json"), "r") as f:
+    
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"), "r") as f:
         cfg = json.load(f)
 
-    # remove all elements in scene
-    bpy.ops.object.select_by_layer()
+    for obj in bpy.data.objects:
+        obj.select_set(True)
+        
     bpy.ops.object.delete(use_global=False)
 
-    # create world
     world = bpy.data.worlds.new("World")
-    world.use_sky_paper = True
     bpy.context.scene.world = world
+    
+    cam = bpy.data.cameras.new('Cam01')
+    cam_object = bpy.data.objects.new(name='Cam01', object_data=cam)
+    bpy.context.collection.objects.link(cam_object)
+    bpy.context.view_layer.objects.active = cam_object
+    bpy.context.scene.camera = cam_object
 
-    # create camera
-    bpy.ops.object.add(type="CAMERA")
-    cam = bpy.context.object
-    bpy.context.scene.camera = cam
+    light = bpy.data.lights.new('sun_light', type='SUN')
+    light.angle = np.pi/2
+    light_object = bpy.data.objects.new(name='sun_light', object_data=light)
+    light_object.location=(0, -1, 0)
+    
+    bpy.context.collection.objects.link(light_object)
+    bpy.context.view_layer.objects.active = light_object
 
-    # create light
-    bpy.ops.object.lamp_add(type="SUN", radius=1, view_align=False, location=(0, -1, 0), rotation=(pi/2, 0, 0))
-
-    # create object
     bpy.ops.import_scene.importldraw(filepath=brick_file_path)
     bpy.data.objects.remove(bpy.data.objects["LegoGroundPlane"])
 
-    # after loading brick, move camera position
-    cam.location = (0, -1, 0)
-    cam.rotation_euler = Euler((pi/2, 0, 0), "XYZ")
+    cam_object.location = (0, -1, 0)
+    cam_object.rotation_euler = Euler((np.pi/2, 0, 0), "XYZ")
 
-    # brick selection
-    for obj in bpy.data.objects:
-        if obj.name.endswith(".dat"):
-            brick = obj
-            break
-
-    # render and image settings
+    brick = [obj for obj in bpy.data.objects if obj.name.endswith(".dat")][0]
+    
     if not os.path.exists(render_folder):
         os.mkdir(render_folder)
-    bpy.context.scene.render.engine = "BLENDER_RENDER"
+
+    #bpy.context.scene.render.engine = "BLENDER_EEVEE"
     rnd = bpy.data.scenes["Scene"].render
     rnd.resolution_x = cfg["width"]
     rnd.resolution_y = cfg["height"]
     rnd.resolution_percentage = 100
+
     bpy.context.scene.render.image_settings.file_format = "JPEG"
     bpy.context.scene.render.image_settings.color_mode = "RGB"
     bpy.context.scene.render.image_settings.quality = cfg["jpeg_compression"]
-
 
     # list of possible background images
     if background_file_path:
@@ -77,9 +77,8 @@ def render_brick(brick_file_path: str, n: int, render_folder: str, background_fi
             ext = os.path.splitext(f)[1]
             if ext.lower() in valid_ext:
                 images.append(os.path.join(background_file_path, f))
-
-    debug_list = []
     r = cfg["rotation_intervals"]
+
     for i in range(n):
         # brick settings
         brick_scale_factor = random.uniform(cfg['zoom_min'], cfg['zoom_max'])
@@ -99,57 +98,42 @@ def render_brick(brick_file_path: str, n: int, render_folder: str, background_fi
 
         # set color
         color = hex2rgb(random.choice(cfg["color"]))
+        color.append(1.0)
+        color = tuple(color)
 
-        debug_list.append({
-            "brick_posx": brick_posx,
-            "brick_posy": brick_posy,
-            "brick_posz": brick_posz,
-            "brick_rotx": brick_rotx,
-            "brick_roty": brick_roty,
-            "brick_rotz": brick_rotz,
-            "brick_scale_factor": brick_scale_factor,
-            "color": color
-        }, )
+        bpy.data.materials["Material_4_c"].node_tree.nodes["Group"].inputs['Color'].default_value = color
+        
 
-
-        if brick.active_material:
-            brick.active_material.diffuse_color = color
-        else:  # brick consists of more than one parts
-            for obj in brick.children:
-                if len(obj.material_slots) == 0:
-                    bpy.context.scene.objects.active = obj
-                    bpy.ops.object.material_slot_add()
-                obj.material_slots[0].material = bpy.data.materials["Material"]
-                obj.active_material.diffuse_color = color
-
+        object_name = None
         if background_file_path:
-            # select random background image
             bg_image = random.choice(images)
-            image = bpy.data.images.load(bg_image)
+            base=os.path.basename(bg_image)
+            object_name=os.path.splitext(base)[0]
+            bpy.ops.import_image.to_plane(shader='SHADELESS', files=[{'name':bg_image}])
 
-            # set background image
-            tex = bpy.data.textures.new(bg_image, "IMAGE")
-            tex.image = image
-            slot = world.texture_slots.add()
-            slot.texture = tex
-            slot.use_map_horizon = True
+            plane = bpy.data.objects[object_name]
+            plane.location = (0, 1.0, 0)
+            plane.scale = (1.4, 1.4, 1.0)
+        else:
+            bpy.ops.mesh.primitive_plane_add(size=2.0, calc_uvs=True, enter_editmode=False, align='WORLD', location=(0.0, 1.0, 0.0), rotation=(np.pi/2, 0.0, 0.0))
+        
+     
+        file_name, file_extension = os.path.splitext(os.path.basename(brick_file_path))
+        rnd.filepath = os.path.join(render_folder, "{0}_{1}.jpg".format(file_name, i))
 
-        # render image
-        rnd.filepath = os.path.join(render_folder, str(i) + ".jpg")
         bpy.ops.render.render(write_still=True)
 
-        # remove current background
-        world.texture_slots.clear(0)
-
-    if debug:
-        with open(os.path.join(render_folder, "debug.json"), "w") as fd:
-            json.dump(debug_list, fd, indent=2)
-
+        if background_file_path:
+            bpy.data.objects[object_name].select_set(True) # Blender 2.8x
+            bpy.ops.object.delete() 
+        else:
+            bpy.data.objects["Plane"].select_set(True) # Blender 2.8x
+            bpy.ops.object.delete() 
 
 if __name__ == '__main__':
 
     # check whether script is opened in blender
-    import sys, json, argparse
+    import sys, argparse
     if bpy.context.space_data:
         cwd = os.path.dirname(bpy.context.space_data.text.filepath)
     else:
@@ -193,10 +177,6 @@ if __name__ == '__main__':
           "-s", "--save", dest="save", type=str, required=False, default="./", help="Output folder"
     )
 
-    parser.add_argument(
-          "--debug", action="store_true"
-    )
-
     args = parser.parse_args(argv)
     if not argv:
         parser.print_help()
@@ -204,4 +184,6 @@ if __name__ == '__main__':
 
 
     # finally render image(s)
-    render_brick(args.input, args.number, args.save, args.background, args.debug)
+
+    render_brick(args.input, args.number, args.save, args.background)
+

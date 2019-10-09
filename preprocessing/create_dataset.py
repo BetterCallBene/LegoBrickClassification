@@ -1,32 +1,7 @@
+#!/usr/bin/env python
 import os
-import sys
-import argparse
-from typing import List
 
-from create_part_category_list import create_part_category_list
-
-
-def get_blender_command(path_in, bg_images_path, images_per_brick, path_out, debug=True):
-    # path or reference to blender executable
-    if sys.platform == "darwin":
-        blender = "/Applications/Blender/blender.app/Contents/MacOS/blender"
-    else:
-        blender = "blender"
-
-    bg = "-b='" + bg_images_path + "' " if bg_images_path else ""
-    debug = " --debug" if debug else ""
-
-    return (blender + " -b -P "
-            + os.path.dirname(__file__)
-            + "/render_brick.py -- "
-            + "-i='" + path_in + "' "
-            + bg
-            + "-n=" + str(images_per_brick) + " "
-            + "-s='" + path_out + "'"
-            + debug)
-
-
-def run_shell_script(command: str):
+def run_shell_script(command):
     try:
         os.system(command)
     except OSError as oe:
@@ -34,78 +9,25 @@ def run_shell_script(command: str):
         print(oe)
         raise
 
-
-def generate_single_category_dataset(dataset_in_path: str, category: str, bg_images_path: str, dataset_out_path: str,
-                                     images_per_brick: int):
-    """ Generates images for a given category.
-
-    A folder is created for each part of the category.
-
-    :param dataset_in_path: directory contains a set of .dat files
-    :param category: lego category (see: create_part_category_list)
-    :param bg_images_path: directory contains a set of images for background
-    :param dataset_out_path: output path for generated images e.g. dataset/
-    :param images_per_brick: number of images per brick
-    :return: writes generated images to file
-    """
-
-    df = create_part_category_list(dataset_in_path)
-    df = df[df.category.str.match(category)]
-
-    if len(df.index) > 0:
-        # read all 3d files
-        files = []
-        for file in os.listdir(dataset_in_path):
-            if file.endswith(".dat") and file[:-4] in df.id.values:
-                files.append(file)
-
-        # for each brick render IMAGES_PER_BRICk
-        for file in files:
-            part_number = file[:-4]  # remove extension to receive the part number
-
-            path_out = os.path.join(dataset_out_path, category, part_number)
-            path_in = os.path.join(dataset_in_path, file)
-
-            # create folders titled by category and part number
-            if not os.path.exists(path_out):
-                os.makedirs(path_out)
-
-            # run blender python script to render images
-            command = get_blender_command(path_in, bg_images_path, images_per_brick, path_out)
-            run_shell_script(command)
+def get_blender_command(path_in, bg_images_path, images_per_brick, path_out):
+    # path or reference to blender executable
+    if sys.platform == "darwin":
+        blender = "/Applications/Blender/blender.app/Contents/MacOS/blender"
     else:
-        raise(ValueError("category '{}' not found".format(category)))
+        blender = "blender"
 
+    bg = "-b='" + bg_images_path + "' " if bg_images_path else ""
+    
+    
+    return (blender + " -b -P "
+            + os.path.dirname(os.path.realpath(__file__))
+            + "/render_brick.py -- "
+            + "-i='" + path_in + "' "
+            + bg
+            + "-n=" + str(images_per_brick) + " "
+            + "-s='" + path_out + "'")
 
-def generate_single_part_dataset(file_path: str, bg_images_path: str, dataset_out_path: str, images_per_brick: int):
-    """Renders images for a given brick.
-
-    :param file_path: path to .dat file
-    :param bg_images_path: path to folder of images used as background
-    :param dataset_out_path: output directory
-    :param images_per_brick: number of images to render
-    :return: writes rendered images to out_path
-    """
-    part_number = file_path[:-4]  # remove extension to receive the part number
-
-    path_out = os.path.join(dataset_out_path, part_number) + "/"
-
-    with open(file_path, 'r') as f:
-        line = f.readline()
-        if "~Moved to" in line:
-            print("Part id moved to another one!")
-
-    # create folder titled by part number
-    if not os.path.exists(os.path.join(dataset_out_path + part_number)):
-        os.makedirs(dataset_out_path + part_number)
-
-    # have to execute a blender script
-    command = get_blender_command(file_path, bg_images_path, images_per_brick, path_out)
-    run_shell_script(command)
-
-
-def generate_dataset(dataset_in_path: str, bg_images_path: str, dataset_out_path: str, images_per_brick: int,
-                     except_list: List[str]):
+def generate_dataset(dataset_in_path, bg_images_path, dataset_out_path, images_per_brick, except_list):
     """Generates a dataset of images using 3d models.
 
     A directory is created for each category and each category folder contains subdirectories for each individual brick.
@@ -116,7 +38,9 @@ def generate_dataset(dataset_in_path: str, bg_images_path: str, dataset_out_path
     :param images_per_brick: number of images per brick
     :param except_list: list of categories in order to skip
     :return: Writes generated images to file
-    """
+    # """
+    
+    
 
     # read all 3d files
     files = []
@@ -124,10 +48,14 @@ def generate_dataset(dataset_in_path: str, bg_images_path: str, dataset_out_path
         if file.endswith(".dat"):
             files.append(file)
 
-    # for each brick render IMAGES_PER_BRICk
+    print(len(files))
+
+    # # for each brick render IMAGES_PER_BRICk
+
+    summary = dict()
 
     for i, file in enumerate(files):
-        part_number = file[:-4]  # remove extension to receive the part number
+        part_number, file_extension = os.path.splitext(file)
         print("processing file {} ({}/{})".format(part_number, i+1, len(files)))
         path_in = os.path.join(dataset_in_path, file)
         with open(path_in, 'r') as f:
@@ -136,7 +64,7 @@ def generate_dataset(dataset_in_path: str, bg_images_path: str, dataset_out_path
             if "~Moved to" in line:
                 print("skip part: {}".format(line))
                 continue
-            # skip unimportant categories
+    #         # skip unimportant categories
             label = line[2:-1]
             if '~' in label:
                 label = label.replace('~', '')
@@ -148,32 +76,41 @@ def generate_dataset(dataset_in_path: str, bg_images_path: str, dataset_out_path
             if category in except_list:
                 print("skip part: {}".format(line))
                 continue
+        if category not in summary:
+            summary[category] = list()
+        summary[category].append((part_number, file))
 
+    category_brick = "Brick"
+    summary_brick = summary[category_brick]
+
+    print ("Only {0}".format(category_brick))
+    
+    category_brick_dir = os.path.join(dataset_out_path, category_brick)
+
+    
+    elms = os.listdir(category_brick_dir)
+    rest = [brick for brick in summary_brick if brick[0] not in elms]
+
+    for part_number, file in rest:
         path_in = os.path.join(dataset_in_path, file)
-        path_out = os.path.join(dataset_out_path, category, part_number)
+        path_out = os.path.join(category_brick_dir, part_number)
         if not os.path.exists(path_out):
             os.makedirs(path_out)
-
-        # run blender python script to render images
+        
+# run blender python script to render images
         command = get_blender_command(path_in, bg_images_path, images_per_brick, path_out)
         run_shell_script(command)
 
-
 if __name__ == "__main__":
-
+    import sys, argparse
     argv = sys.argv[1:]
 
     usage_text = "Run as " + __file__ + " [options]"
     parser = argparse.ArgumentParser(description=usage_text)
 
     parser.add_argument(
-        "-t", "--type", dest="type", required=True, choices=["part", "category", "full"],
-        help="Generate images for a single 'part', 'category' or 'full'"
-    )
-
-    parser.add_argument(
         "-i", "--input", dest="dataset_in", type=str, required=True,
-        help="Input folder for all .dat files or path to file if category 'part' is selected"
+        help="Input folder for all .dat files"
     )
 
     parser.add_argument(
@@ -193,22 +130,7 @@ if __name__ == "__main__":
         help="Number of generated images per brick"
     )
 
-    parser.add_argument(
-        "-c", "--category", dest="category", type=str, required=False,
-        default="Brick",
-        help="Category label for image generation (see: create_part_category_list for details)"
-    )
-
     args = parser.parse_args(argv)
+    
+    generate_dataset(args.dataset_in, args.bg_images, args.dataset_out, args.images_per_brick, ["Minifig", "Sticker", "Duplo", "Figure", "Pov-RAY"])
 
-    if args.type == "part":
-        generate_single_part_dataset(args.dataset_in, args.bg_images, args.dataset_out, args.images_per_brick)
-
-    elif args.type == "category":
-        generate_single_category_dataset(args.dataset_in, args.category, args.bg_images, args.dataset_out,
-                                         args.images_per_brick)
-
-    elif args.type == "full":
-        # skip all parts which are assigned to one of these categories
-        except_list = ["Minifig", "Sticker", "Duplo", "Figure", "Pov-RAY"]
-        generate_dataset(args.dataset_in, args.bg_images, args.dataset_out, args.images_per_brick, except_list)

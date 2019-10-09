@@ -6,3 +6,8 @@ results/
 .vscode
 __pycache__/
 .idea
+background_images/
+render_folder/
+*.ipynb
+.ipynb_checkpoints/
+.LegoBrickClassificationPy/
